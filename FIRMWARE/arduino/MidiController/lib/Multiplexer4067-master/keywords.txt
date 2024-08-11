@@ -1,3 +1,0 @@
-Multiplexer4067	KEYWORD1
-readChannel	KEYWORD2
-
