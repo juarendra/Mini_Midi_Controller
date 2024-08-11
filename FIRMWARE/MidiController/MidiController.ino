@@ -1,9 +1,5 @@
 #include "EEvar.h"
-
 #include "FastLED.h"
-
-FASTLED_USING_NAMESPACE
-
 #define DATA_PIN    21
 //#define CLK_PIN   4
 #define LED_TYPE    WS2812
@@ -14,8 +10,6 @@ FASTLED_USING_NAMESPACE
 CRGB leds[NUM_LEDS];
 byte ledIndex[NUM_LEDS_1] = {0, 2, 5, 7, 10, 12 };
 byte ledIndex_[NUM_LEDS_1] = {1, 3, 6, 8, 11, 13 };
-
-
 
 #define BRIGHTNESS          96
 #define FRAMES_PER_SECOND  120
@@ -39,7 +33,6 @@ byte ch1Hue = 1;
 byte maxHue = 240;
 byte brightness = 240;
 
-
 struct Config {
   byte listCh1OffHue[6];
   byte listCh1OnHue[6] ;
@@ -61,33 +54,8 @@ struct Config {
 #define ATMEGA32U4 1
 #define DEBUG 0
 
-/////////////////////////////////////////////
-// Are you using encoders?
-// #define USING_ENCODER 1 //* comment if not using encoders, uncomment if using it.
-
-/////////////////////////////////////////////
-// LIBRARIES
-// -- Defines the MIDI library -- //
-
-// if using with ATmega328 - Uno, Mega, Nano...
-#ifdef ATMEGA328
-#include <MIDI.h>
-//MIDI_CREATE_DEFAULT_INSTANCE();
-
-// if using with ATmega32U4 - Micro, Pro Micro, Leonardo...
-#elif ATMEGA32U4
 #include "MIDIUSB.h"
 
-#endif
-// ---- //
-
-//////////////////////
-// Threads
-#include <Thread.h> // Threads library >> https://github.com/ivanseidel/ArduinoThread
-#include <ThreadController.h> // Same as above
-
-
-/////////////////////////////////////////////
 // BUTTONS
 const int N_BUTTONS = 6; //*  total numbers of buttons. Number of buttons in the Arduino + number of buttons on multiplexer 1 + number of buttons on multiplexer 2...
 const int N_BUTTONS_ARDUINO = 6; //* number of buttons connected straight to the Arduino (in order)
@@ -98,9 +66,6 @@ int buttonMuxThreshold = 300;
 int buttonCState[N_BUTTONS] = {0};        // stores the button current value
 int buttonPState[N_BUTTONS] = {0};        // stores the button previous value
 
-//#define pin13 1 // uncomment if you are using pin 13 (pin with led), or comment the line if it is not
-byte pin13index = 12; //* put the index of the pin 13 of the buttonPin[] array if you are using, if not, comment
-
 // debounce
 unsigned long lastDebounceTime[N_BUTTONS] = {0};  // the last time the output pin was toggled
 unsigned long debounceDelay = 5;    //* the debounce time; increase if the output flickers
@@ -108,16 +73,11 @@ unsigned long debounceDelay = 5;    //* the debounce time; increase if the outpu
 // velocity
 byte velocity[N_BUTTONS] = {127};
 
-
-/////////////////////////////////////////////
-
-/////////////////////////////////////////////
 // CHANNEL
 byte MIDI_CH = 0; //* MIDI channel to be used
 byte BUTTON_MIDI_CH = 0; //* MIDI channel to be used
 byte NOTE = 36; //* Lowest NOTE to be used - if not using custom NOTE NUMBER
 byte CC = 1; //* Lowest MIDI CC to be used - if not using custom CC NUMBER
-
 
 byte midiChMenuColor = 200;
 
@@ -126,12 +86,42 @@ int changeColorOff[5]  = {1, 2, 3, 4, 5};
 bool menuChangeColor = false;
 int selectedChangeColor = 99;
 
-
 const EEstore<Config> eeStruct((Config())); //store without buffering
 Config conf;
 
-void setup() {
+// POTENTIOMETER
+#include <ResponsiveAnalogRead.h> 
 
+const int N_POTS = 2;                            // total numbers of pots (slide & rotary)
+const int POT_ARDUINO_PIN[N_POTS] = { A7, A9 };  // pins of each pot connected straight to the Arduino
+
+int potCState[N_POTS] = { 0 };  // Current state of the pot
+int potPState[N_POTS] = { 0 };  // Previous state of the pot
+int potVar = 0;                 // Difference between the current and previous state of the pot
+
+int midiCState[N_POTS] = { 0 };  // Current state of the midi value
+int midiPState[N_POTS] = { 0 };  // Previous state of the midi value
+
+const int TIMEOUT = 300;              // Amount of time the potentiometer will be read after it exceeds the varThreshold
+const int varThreshold = 20;          // Threshold for the potentiometer signal variation
+boolean potMoving = true;             // If the potentiometer is moving
+unsigned long PTime[N_POTS] = { 0 };  // Previously stored time
+unsigned long timer[N_POTS] = { 0 };  // Stores the time that has elapsed since the timer was reset
+
+int reading = 0;
+// Responsive Analog Read
+float snapMultiplier = 0.01;                      // (0.0 - 1.0) - Increase for faster, but less smooth reading
+ResponsiveAnalogRead responsivePot[N_POTS] = {};  // creates an array for the responsive pots. It gets filled in the Setup.
+
+int potMin = 10;
+int potMax = 1023;
+
+// MIDI
+byte midiCh = 0;  // MIDI channel to be used - start with 1 for MIDI.h lib or 0 for MIDIUSB lib
+byte note = 36;   // Lowest note to be used
+byte cc = 1;      // Lowest MIDI CC to be used
+
+void setup() {
 
   //eeStruct >> conf;
   for (int i = 0; i<6; i++) {
@@ -161,11 +151,15 @@ void setup() {
   FastLED.setBrightness(conf.brightness);
   setAllLeds(1, 0);// set all leds at once with a hue (hue, randomness)
   FastLED.show();
-  //////////////////////////////////////
+
   // Buttons
   // Initialize buttons with pull up resistors
   for (int i = 0; i < N_BUTTONS_ARDUINO; i++) {
     pinMode(BUTTON_ARDUINO_PIN[i], INPUT_PULLUP);
+  }
+  for (int i = 0; i < N_POTS; i++) {
+    responsivePot[i] = ResponsiveAnalogRead(0, true, snapMultiplier);
+    responsivePot[i].setAnalogResolution(1023);  // sets the resolution
   }
 
 }
@@ -174,6 +168,7 @@ void loop() {
   if (BUTTON_MIDI_CH < 5){
     MIDIread();
     buttons();
+    potentiometers();
   }
   if (BUTTON_MIDI_CH >= 5){
     if (BUTTON_MIDI_CH == 15){
@@ -184,6 +179,53 @@ void loop() {
     }
   }
 
+}
+
+
+void potentiometers() {
+  for (int i = 0; i < N_POTS; i++) {  // Loops through all the potentiometers
+
+    reading = analogRead(POT_ARDUINO_PIN[i]);
+    responsivePot[i].update(reading);
+    potCState[i] = responsivePot[i].getValue();
+
+    midiCState[i] = map(potCState[i], potMin, potMax, 0, 127);  // Maps the reading of the potCState to a value usable in midi
+    //midiCState[i] = map(potCState[i], 0, 4096, 0, 127);  // Maps the reading of the potCState to a value usable in midi - use for ESP32
+
+    if (midiCState[i] < 0) {
+      midiCState[i] = 0;
+    }
+    if (midiCState[i] > 127) {
+      midiCState[i] = 0;
+    }
+
+    potVar = abs(potCState[i] - potPState[i]);  // Calculates the absolute value between the difference between the current and previous state of the pot
+    //Serial.println(potVar);
+
+    if (potVar > varThreshold) {  // Opens the gate if the potentiometer variation is greater than the threshold
+      PTime[i] = millis();        // Stores the previous time
+    }
+
+    timer[i] = millis() - PTime[i];  // Resets the timer 11000 - 11000 = 0ms
+
+    if (timer[i] < TIMEOUT) {  // If the timer is less than the maximum allowed time it means that the potentiometer is still moving
+      potMoving = true;
+    } else {
+      potMoving = false;
+    }
+
+    if (potMoving == true) {  // If the potentiometer is still moving, send the change control
+      if (midiPState[i] != midiCState[i]) {
+
+        //use if using with ATmega32U4 (micro, pro micro, leonardo...)
+        controlChange(midiCh, cc + i, midiCState[i]);  //  (channel, CC number,  CC value)
+        MidiUSB.flush();
+
+        potPState[i] = potCState[i];  // Stores the current reading of the potentiometer to compare with the next
+        midiPState[i] = midiCState[i];
+      }
+    }
+  }
 }
 
 void changeBrignes(){
@@ -762,7 +804,7 @@ void handlennOn(byte channel, byte number, byte value) {
 
 }
 
-void   (byte channel, byte number, byte value) {
+void handlennOff(byte channel, byte number, byte value) {
 
   if (channel == BUTTON_MIDI_CH) {
     int ledN = number - NOTE;
