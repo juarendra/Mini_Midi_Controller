@@ -25,7 +25,7 @@ for Connection from Pro Micro to all Button and RGB you can use Connector and sk
 </p>
 
 ## Wiring Connection
-- [Wiring](https://github.com/juarendra/Mini_Midi_Controller/blob/main/HARDWARE/dimension_miniMidiController.pdf)
+- [Wiring](https://github.com/juarendra/Mini_Midi_Controller/blob/main/HARDWARE/MiniMidiController_pinout.pdf)
 
 ## BOM
 | Item  | QTY |
